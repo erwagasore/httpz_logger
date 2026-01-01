@@ -1,0 +1,16 @@
+.{
+    .name = .httpz_logger,
+    .version = "0.1.0",
+    .fingerprint = 0xd5c0bd8953fa37ae,
+    .dependencies = .{
+        .httpz = .{
+            .url = "git+https://github.com/karlseguin/http.zig?ref=master#1c0ec3751c53e276d5e0c42b6d5481e72d9d1971",
+            .hash = "httpz-0.0.0-PNVzrEktBwCzPoiua-S8LAYo2tILqczm3tSpneEzLQ9L",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
