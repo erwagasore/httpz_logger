@@ -1,4 +1,4 @@
-# httpz-logger
+# httpz_logger
 
 Request logging middleware for [http.zig](https://github.com/karlseguin/http.zig) with OpenTelemetry support.
 
@@ -19,8 +19,8 @@ timestamp=2025-01-01T12:00:00Z level=info method=GET path=/api/users status=200 
 Add to your `build.zig.zon`:
 
 ```zig
-.@"httpz-logger" = .{
-    .url = "git+https://github.com/erwagasore/httpz-logger#main",
+.httpz_logger = .{
+    .url = "git+https://github.com/erwagasore/httpz_logger#main",
     .hash = "...",
 },
 ```
@@ -28,8 +28,8 @@ Add to your `build.zig.zon`:
 Add to your `build.zig`:
 
 ```zig
-const httpz_logger = b.dependency("httpz-logger", .{ .target = target, .optimize = optimize });
-exe.root_module.addImport("httpz-logger", httpz_logger.module("httpz-logger"));
+const httpz_logger = b.dependency("httpz_logger", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("httpz_logger", httpz_logger.module("httpz_logger"));
 ```
 
 ## Usage
@@ -37,7 +37,7 @@ exe.root_module.addImport("httpz-logger", httpz_logger.module("httpz-logger"));
 ```zig
 const std = @import("std");
 const httpz = @import("httpz");
-const RequestLogger = @import("httpz-logger");
+const RequestLogger = @import("httpz_logger");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

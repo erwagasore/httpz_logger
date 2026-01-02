@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const httpz = b.dependency("httpz", .{ .target = target, .optimize = optimize });
 
-    _ = b.addModule("httpz-logger", .{
+    _ = b.addModule("httpz_logger", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
