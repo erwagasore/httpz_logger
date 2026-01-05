@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get latest tag
         id: get_tag
@@ -59,7 +60,9 @@ jobs:
           fi
 
           new_version="v$major.$minor.$patch"
+          new_version_no_v="$major.$minor.$patch"
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
+          echo "new_version_no_v=$new_version_no_v" >> $GITHUB_OUTPUT
           echo "Bumping from $latest_tag to $new_version"
 
       - name: Check if release needed
@@ -75,6 +78,23 @@ jobs:
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Update build.zig.zon version
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          new_version="${{ steps.bump.outputs.new_version_no_v }}"
+          sed -i "s/\.version = \"[^\"]*\"/\.version = \"$new_version\"/" build.zig.zon
+          echo "Updated build.zig.zon to version $new_version"
+          cat build.zig.zon
+
+      - name: Commit version bump
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add build.zig.zon
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
+          git push
+
       - name: Generate changelog
         id: changelog
         if: steps.check.outputs.skip == 'false'
@@ -82,9 +102,9 @@ jobs:
           latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
 
           if [ "$latest_tag" = "v0.0.0" ]; then
-            changelog=$(git log --pretty=format:"- %s" | head -50)
+            changelog=$(git log --pretty=format:"- %s" HEAD~1 | head -50)
           else
-            changelog=$(git log "$latest_tag"..HEAD --pretty=format:"- %s")
+            changelog=$(git log "$latest_tag"..HEAD~1 --pretty=format:"- %s")
           fi
 
           # Escape for GitHub output
