@@ -4,8 +4,8 @@
     .fingerprint = 0xd5c0bd8953fa37ae,
     .dependencies = .{
         .httpz = .{
-            .url = "git+https://github.com/karlseguin/http.zig?ref=master#1c0ec3751c53e276d5e0c42b6d5481e72d9d1971",
-            .hash = "httpz-0.0.0-PNVzrEktBwCzPoiua-S8LAYo2tILqczm3tSpneEzLQ9L",
+            .url = "git+https://github.com/karlseguin/http.zig?ref=dev#cf8fc80b3745257497e83af913c84fe645b30086",
+            .hash = "httpz-0.0.0-PNVzrLXyBgAs425jxkppDbrck8Tv8HyEYCqC60IUQqOQ",
         },
     },
     .paths = .{
