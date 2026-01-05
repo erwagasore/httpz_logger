@@ -37,7 +37,7 @@ exe.root_module.addImport("httpz_logger", httpz_logger.module("httpz_logger"));
 ```zig
 const std = @import("std");
 const httpz = @import("httpz");
-const RequestLogger = @import("httpz_logger");
+const HttpLogger = @import("httpz_logger");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -47,7 +47,7 @@ pub fn main() !void {
     defer server.deinit();
 
     // Add logger middleware
-    const logger = try server.middleware(RequestLogger, .{});
+    const logger = try server.middleware(HttpLogger, .{});
 
     var router = try server.router(.{ .middlewares = &.{logger} });
     router.get("/", handleIndex, .{});
@@ -63,7 +63,7 @@ fn handleIndex(_: *httpz.Request, res: *httpz.Response) !void {
 ## Configuration
 
 ```zig
-const logger = try server.middleware(RequestLogger, .{
+const logger = try server.middleware(HttpLogger, .{
     .format = .json,           // .logfmt (default) or .json
     .min_status = 400,         // only log responses >= this status (default: 0, log all)
     .min_level = .warn,        // only log at this level or higher (default: .info)
