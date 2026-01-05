@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
+
+          # Remove 'v' prefix for parsing
+          version="${latest_tag#v}"
+
+          # Parse semver components
+          major=$(echo "$version" | cut -d. -f1)
+          minor=$(echo "$version" | cut -d. -f2)
+          patch=$(echo "$version" | cut -d. -f3)
+
+          # Get commit messages since last tag
+          if [ "$latest_tag" = "v0.0.0" ]; then
+            commits=$(git log --oneline)
+          else
+            commits=$(git log "$latest_tag"..HEAD --oneline)
+          fi
+
+          # Determine bump type from commit messages
+          # BREAKING CHANGE or !: -> major
+          # feat: -> minor
+          # fix:, chore:, docs:, etc. -> patch
+          if echo "$commits" | grep -qiE "(BREAKING CHANGE|^[a-z]+!:)"; then
+            major=$((major + 1))
+            minor=0
+            patch=0
+          elif echo "$commits" | grep -qiE "^[a-f0-9]+ feat"; then
+            minor=$((minor + 1))
+            patch=0
+          else
+            patch=$((patch + 1))
+          fi
+
+          new_version="v$major.$minor.$patch"
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+          echo "Bumping from $latest_tag to $new_version"
+
+      - name: Check if release needed
+        id: check
+        run: |
+          latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
+          new_version="${{ steps.bump.outputs.new_version }}"
+
+          if [ "$latest_tag" = "$new_version" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "No new commits since last release"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          latest_tag="${{ steps.get_tag.outputs.latest_tag }}"
+
+          if [ "$latest_tag" = "v0.0.0" ]; then
+            changelog=$(git log --pretty=format:"- %s" | head -50)
+          else
+            changelog=$(git log "$latest_tag"..HEAD --pretty=format:"- %s")
+          fi
+
+          # Escape for GitHub output
+          changelog="${changelog//'%'/'%25'}"
+          changelog="${changelog//$'\n'/'%0A'}"
+          changelog="${changelog//$'\r'/'%0D'}"
+
+          echo "changelog=$changelog" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        if: steps.check.outputs.skip == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.new_version }}
+          name: ${{ steps.bump.outputs.new_version }}
+          body: |
+            ## Changes
+            ${{ steps.changelog.outputs.changelog }}
+          generate_release_notes: false
