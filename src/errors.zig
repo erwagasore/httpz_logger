@@ -9,10 +9,10 @@ const std = @import("std");
 pub const FormatError = error{
     /// Buffer is too small for the formatted output
     BufferTooSmall,
-    
+
     /// Invalid UTF-8 sequence in input data
     InvalidUtf8,
-    
+
     /// General out of memory condition
     OutOfMemory,
 };
@@ -21,10 +21,10 @@ pub const FormatError = error{
 pub const LogError = error{
     /// Failed to allocate memory for log buffer
     AllocationFailed,
-    
+
     /// Log entry was truncated due to size limits
     LogTruncated,
-    
+
     /// Failed to format timestamp
     TimestampError,
 };

@@ -16,10 +16,10 @@ test "fuzz: logfmt formatter with random data" {
     var i: usize = 0;
     while (i < constants.Test.FUZZ_ITERATIONS) : (i += 1) {
         var input_buf: [constants.Buffer.LARGE]u8 = undefined;
-        
+
         // Create timestamp
         var ts = Timestamp.init(fuzzer.rng.random().int(i64));
-        
+
         var data = data_extractor.LogData{
             .timestamp_buf = undefined,
             .address_buf = undefined,
@@ -36,7 +36,7 @@ test "fuzz: logfmt formatter with random data" {
             .request_id = if (fuzzer.rng.random().boolean()) fuzzer.randomPrintableString(input_buf[398..450]) else null,
             .user_id = if (fuzzer.rng.random().boolean()) fuzzer.randomPrintableString(input_buf[450..500]) else null,
         };
-        
+
         // Format timestamp
         _ = ts.iso8601(&data.timestamp_buf);
 
@@ -62,9 +62,9 @@ test "fuzz: json formatter with random data" {
     var i: usize = 0;
     while (i < constants.Test.FUZZ_ITERATIONS) : (i += 1) {
         var input_buf: [constants.Buffer.LARGE]u8 = undefined;
-        
+
         var ts = Timestamp.init(fuzzer.rng.random().int(i64));
-        
+
         var data = data_extractor.LogData{
             .timestamp_buf = undefined,
             .address_buf = undefined,
@@ -81,11 +81,11 @@ test "fuzz: json formatter with random data" {
             .request_id = if (fuzzer.rng.random().boolean()) fuzzer.randomPrintableString(input_buf[398..450]) else null,
             .user_id = if (fuzzer.rng.random().boolean()) fuzzer.randomPrintableString(input_buf[450..500]) else null,
         };
-        
+
         _ = ts.iso8601(&data.timestamp_buf);
 
         var output_buf: [constants.Buffer.EXTRA_LARGE]u8 = undefined;
-        
+
         // Should not crash
         var stream2 = std.io.fixedBufferStream(&output_buf);
         _ = json.formatWriter(data, fuzzer.randomLogLevel(), stream2.writer()) catch |err| {
