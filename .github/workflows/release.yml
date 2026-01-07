@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   release:
@@ -15,13 +16,37 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check for version bump commit message
+        id: check_bump
+        run: |
+          # Extract bump type from commit message
+          # Format: "feat:" = minor, "fix:" = patch, "BREAKING:" = major, "release:" = as specified
+          commit_msg="${{ github.event.head_commit.message }}"
+          if [[ "$commit_msg" == *"BREAKING:"* ]] || [[ "$commit_msg" == *"breaking:"* ]]; then
+            echo "bump=major" >> $GITHUB_OUTPUT
+          elif [[ "$commit_msg" == *"feat:"* ]]; then
+            echo "bump=minor" >> $GITHUB_OUTPUT
+          elif [[ "$commit_msg" == *"fix:"* ]] || [[ "$commit_msg" == *"docs:"* ]] || [[ "$commit_msg" == *"chore:"* ]]; then
+            echo "bump=patch" >> $GITHUB_OUTPUT
+          elif [[ "$commit_msg" == *"release: major"* ]]; then
+            echo "bump=major" >> $GITHUB_OUTPUT
+          elif [[ "$commit_msg" == *"release: minor"* ]]; then
+            echo "bump=minor" >> $GITHUB_OUTPUT  
+          elif [[ "$commit_msg" == *"release: patch"* ]]; then
+            echo "bump=patch" >> $GITHUB_OUTPUT
+          else
+            echo "bump=none" >> $GITHUB_OUTPUT
+          fi
+
       - name: Bump version and push tag
         id: tag
         uses: anothrNick/github-tag-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DEFAULT_BUMP: none
+          DEFAULT_BUMP: ${{ steps.check_bump.outputs.bump }}
           WITH_V: true
+          RELEASE_BRANCHES: main
+          VERBOSE: true
 
       - name: Update build.zig.zon
         if: steps.tag.outputs.new_tag != steps.tag.outputs.tag
@@ -34,9 +59,83 @@ jobs:
           git commit -m "chore: bump version to $version" || true
           git push
 
+      - name: Generate changelog
+        id: changelog
+        if: steps.tag.outputs.new_tag != steps.tag.outputs.tag
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          configurationJson: |
+            {
+              "categories": [
+                {
+                  "title": "## 🚀 Features",
+                  "labels": ["feature", "enhancement", "feat"]
+                },
+                {
+                  "title": "## 🐛 Bug Fixes",
+                  "labels": ["fix", "bugfix", "bug"]
+                },
+                {
+                  "title": "## 📚 Documentation",
+                  "labels": ["documentation", "docs"]
+                },
+                {
+                  "title": "## 🔨 Refactoring",
+                  "labels": ["refactor", "refactoring"]
+                },
+                {
+                  "title": "## 🧪 Testing",
+                  "labels": ["test", "tests", "testing"]
+                },
+                {
+                  "title": "## ⚡ Performance",
+                  "labels": ["performance", "optimization", "perf"]
+                },
+                {
+                  "title": "## 🔒 Security",
+                  "labels": ["security"]
+                },
+                {
+                  "title": "## 🔧 Maintenance",
+                  "labels": ["chore", "maintenance", "ci", "build"]
+                }
+              ],
+              "pr_template": "- #{{TITLE}} by @#{{AUTHOR}} in ##{{NUMBER}}",
+              "template": "#{{CHANGELOG}}\n\n**Full Changelog**: #{{RELEASE_DIFF}}",
+              "empty_template": "- No changes",
+              "max_pull_requests": 30,
+              "max_back_track_time_days": 365
+            }
+          toTag: ${{ steps.tag.outputs.new_tag }}
+          fromTag: ${{ steps.tag.outputs.tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create release
         if: steps.tag.outputs.new_tag != steps.tag.outputs.tag
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.new_tag }}
-          generate_release_notes: true
+          name: Release ${{ steps.tag.outputs.new_tag }}
+          body: |
+            # Release ${{ steps.tag.outputs.new_tag }}
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ## Installation
+
+            Add to your `build.zig.zon`:
+            ```zig
+            .dependencies = .{
+                .httpz_logger = .{
+                    .url = "https://github.com/${{ github.repository }}/archive/${{ steps.tag.outputs.new_tag }}.tar.gz",
+                },
+            }
+            ```
+
+            Then run:
+            ```bash
+            zig fetch --save https://github.com/${{ github.repository }}/archive/${{ steps.tag.outputs.new_tag }}.tar.gz
+            ```
+          draft: false
+          prerelease: false
