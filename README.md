@@ -1,6 +1,13 @@
 # httpz_logger
 
-Request logging middleware for [http.zig](https://github.com/karlseguin/http.zig) with OpenTelemetry support.
+Request logging middleware for [httpz](https://github.com/karlseguin/http.zig) with OpenTelemetry support.
+
+## Features
+
+- 📊 Structured logging in JSON or logfmt format
+- 🔗 OpenTelemetry trace context extraction (W3C `traceparent`)
+- ⚡ Zero-allocation, thread-local buffer design
+- 🎚️ Configurable log levels and status filtering
 
 ## Output
 
