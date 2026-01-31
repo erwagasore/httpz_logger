@@ -8,6 +8,7 @@ Request logging middleware for [httpz](https://github.com/karlseguin/http.zig) w
 - 🔗 OpenTelemetry trace context extraction (W3C `traceparent`)
 - ⚡ Zero-allocation, thread-local buffer design
 - 🎚️ Configurable log levels and status filtering
+- 🪶 Lightweight with no external dependencies
 
 ## Output
 
