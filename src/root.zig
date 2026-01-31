@@ -14,9 +14,14 @@ const std = @import("std");
 const httpz = @import("httpz");
 
 const constants = @import("constants.zig");
+const Buffer = constants.Buffer;
+const Status = constants.Status;
+
 const data_extractor = @import("data_extractor.zig");
-const json_formatter = @import("formatters/json.zig");
-const logfmt_formatter = @import("formatters/logfmt.zig");
+
+/// Thread-local buffer for zero-allocation logging.
+/// Each thread gets its own buffer - no locks, no contention.
+threadlocal var log_buffer: [Buffer.DEFAULT_SIZE]u8 = undefined;
 
 // ============================================================================
 // Log Level
@@ -27,8 +32,8 @@ const logfmt_formatter = @import("formatters/logfmt.zig");
 /// - 4xx errors → .warn
 /// - All others → .info
 fn logLevelFromStatus(status: u16) std.log.Level {
-    if (status >= 500) return .err;
-    if (status >= 400) return .warn;
+    if (status >= Status.SERVER_ERROR) return .err;
+    if (status >= Status.CLIENT_ERROR) return .warn;
     return .info;
 }
 
@@ -81,9 +86,6 @@ pub const Config = struct {
     /// Include X-User-ID header for user tracking
     log_user_id: bool = true,
 
-    /// Maximum buffer size for log entries (bytes). Larger logs will be truncated.
-    buffer_size: usize = constants.Buffer.DEFAULT_SIZE,
-
     /// Log formatting/buffer errors to stderr for debugging
     log_errors_to_stderr: bool = true,
 };
@@ -135,23 +137,7 @@ fn log(self: *@This(), req: *httpz.Request, res: *httpz.Response, start: i64) vo
         .log_user_id = cfg.log_user_id,
     }, &self.timestamp_cache);
 
-    // Stack-allocate buffer up to threshold, heap-allocate for larger sizes
-    if (cfg.buffer_size <= constants.Buffer.STACK_THRESHOLD) {
-        var stack_buf: [constants.Buffer.STACK_THRESHOLD]u8 = undefined;
-        const buf = stack_buf[0..cfg.buffer_size];
-        self.formatAndLog(data, level, buf);
-    } else {
-        // For large buffers, use heap allocation
-        const allocator = std.heap.page_allocator;
-        const buf = allocator.alloc(u8, cfg.buffer_size) catch {
-            if (cfg.log_errors_to_stderr) {
-                std.debug.print("httpz_logger: Failed to allocate buffer of size {d}\n", .{cfg.buffer_size});
-            }
-            return;
-        };
-        defer allocator.free(buf);
-        self.formatAndLog(data, level, buf);
-    }
+    self.formatAndLog(data, level, &log_buffer);
 }
 
 fn formatAndLog(self: *const @This(), data: data_extractor.LogData, level: std.log.Level, buf: []u8) void {
@@ -160,18 +146,18 @@ fn formatAndLog(self: *const @This(), data: data_extractor.LogData, level: std.l
     const writer = stream.writer();
 
     const format_result = switch (cfg.format) {
-        .json => json_formatter.formatWriter(data, level, writer),
-        .logfmt => logfmt_formatter.formatWriter(data, level, writer),
+        .json => data.toJson(level, writer),
+        .logfmt => data.toLogfmt(level, writer),
     };
 
     if (format_result) |_| {
         const output = stream.getWritten();
 
         // Check if we hit the buffer limit
-        if (stream.pos == buf.len and cfg.log_errors_to_stderr) {
+        if (stream.pos == Buffer.DEFAULT_SIZE and cfg.log_errors_to_stderr) {
             // Log was likely truncated
             dispatchLog(level, output);
-            std.debug.print("httpz_logger: Log entry truncated (buffer size: {d})\n", .{cfg.buffer_size});
+            std.debug.print("httpz_logger: Log entry truncated (buffer size: {d})\n", .{Buffer.DEFAULT_SIZE});
         } else {
             dispatchLog(level, output);
         }
@@ -191,32 +177,28 @@ test {
     _ = @import("constants.zig");
     _ = @import("timestamp.zig");
     _ = @import("data_extractor.zig");
-    _ = @import("formatters/json.zig");
-    _ = @import("formatters/logfmt.zig");
 }
 
 const testing = std.testing;
 
-test "logLevelFromStatus: 5xx returns error" {
+test "logLevelFromStatus" {
+    // 5xx returns error
     try testing.expectEqual(std.log.Level.err, logLevelFromStatus(500));
     try testing.expectEqual(std.log.Level.err, logLevelFromStatus(503));
     try testing.expectEqual(std.log.Level.err, logLevelFromStatus(599));
-}
 
-test "logLevelFromStatus: 4xx returns warn" {
+    // 4xx returns warn
     try testing.expectEqual(std.log.Level.warn, logLevelFromStatus(400));
     try testing.expectEqual(std.log.Level.warn, logLevelFromStatus(404));
     try testing.expectEqual(std.log.Level.warn, logLevelFromStatus(499));
-}
 
-test "logLevelFromStatus: 2xx and 3xx returns info" {
+    // 2xx and 3xx returns info
     try testing.expectEqual(std.log.Level.info, logLevelFromStatus(200));
     try testing.expectEqual(std.log.Level.info, logLevelFromStatus(201));
     try testing.expectEqual(std.log.Level.info, logLevelFromStatus(301));
     try testing.expectEqual(std.log.Level.info, logLevelFromStatus(304));
-}
 
-test "logLevelFromStatus: 1xx returns info" {
+    // 1xx returns info
     try testing.expectEqual(std.log.Level.info, logLevelFromStatus(100));
     try testing.expectEqual(std.log.Level.info, logLevelFromStatus(101));
 }
