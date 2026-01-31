@@ -13,88 +13,85 @@ pub const Time = struct {
     /// Maximum supported year for timestamps
     pub const MAX_YEAR = 9999;
 
-    /// Seconds per day
-    pub const SECONDS_PER_DAY = 86400;
+    /// Seconds per minute
+    pub const SECONDS_PER_MINUTE = 60;
+
+    /// Minutes per hour
+    pub const MINUTES_PER_HOUR = 60;
+
+    /// Hours per day
+    pub const HOURS_PER_DAY = 24;
 
     /// Days per non-leap year
     pub const DAYS_PER_YEAR = 365;
 
     /// Days per leap year
-    pub const DAYS_PER_LEAP_YEAR = 366;
+    pub const DAYS_PER_LEAP_YEAR = DAYS_PER_YEAR + 1;
 
-    /// Maximum years from epoch we support
-    pub const MAX_YEARS_FROM_EPOCH = 8000;
+    /// Seconds per hour (derived)
+    pub const SECONDS_PER_HOUR = SECONDS_PER_MINUTE * MINUTES_PER_HOUR;
+
+    /// Seconds per day (derived)
+    pub const SECONDS_PER_DAY = SECONDS_PER_HOUR * HOURS_PER_DAY;
+
+    /// Returns true if the given year is a leap year.
+    pub fn isLeapYear(y: u16) bool {
+        return (y % 4 == 0 and y % 100 != 0) or (y % 400 == 0);
+    }
 };
 
 /// Buffer size constants
 pub const Buffer = struct {
-    /// Default buffer size for log entries
+    /// Buffer size for log entries (used by thread-local buffer)
     pub const DEFAULT_SIZE = 2048;
-
-    /// Maximum stack-allocated buffer size
-    pub const STACK_THRESHOLD = 4096;
-
-    /// Small buffer for temporary operations
-    pub const SMALL = 256;
-
-    /// Medium buffer for moderate operations
-    pub const MEDIUM = 512;
-
-    /// Large buffer for complex operations
-    pub const LARGE = 1024;
-
-    /// Extra large buffer for JSON/complex formatting
-    pub const EXTRA_LARGE = 4096;
-
-    /// Huge buffer for stress testing
-    pub const HUGE = 8192;
 };
 
-/// Test-related constants
-pub const Test = struct {
-    /// Default number of iterations for property tests
-    pub const FUZZ_ITERATIONS = 1000;
-
-    /// Number of iterations for quick tests
-    pub const QUICK_ITERATIONS = 100;
-
-    /// Random offset range for timestamp tests
-    pub const TIMESTAMP_OFFSET_RANGE = 1000;
+/// HTTP status code boundaries for log level classification
+pub const Status = struct {
+    /// Client error threshold (4xx)
+    pub const CLIENT_ERROR = @intFromEnum(std.http.Status.bad_request);
+    /// Server error threshold (5xx)
+    pub const SERVER_ERROR = @intFromEnum(std.http.Status.internal_server_error);
 };
 
-/// HTTP status code ranges
-pub const StatusCode = struct {
-    /// Informational responses (100-199)
-    pub const INFO_MIN = 100;
-    pub const INFO_MAX = 199;
+/// W3C Traceparent header format constants and validation
+/// Format: {version}-{trace_id}-{span_id}-{flags}
+pub const Traceparent = struct {
+    pub const MIN_LENGTH = 55; // 2 + 1 + 32 + 1 + 16 + 1 + 2
+    pub const VERSION = "00";
+    pub const VERSION_END = 2;
+    pub const TRACE_ID_START = 3;
+    pub const TRACE_ID_END = 35;
+    pub const SPAN_ID_START = 36;
+    pub const SPAN_ID_END = 52;
 
-    /// Successful responses (200-299)
-    pub const SUCCESS_MIN = 200;
-    pub const SUCCESS_MAX = 299;
+    pub fn hasValidLength(header: []const u8) bool {
+        return header.len >= MIN_LENGTH;
+    }
 
-    /// Redirection messages (300-399)
-    pub const REDIRECT_MIN = 300;
-    pub const REDIRECT_MAX = 399;
+    pub fn hasValidVersion(header: []const u8) bool {
+        return std.mem.eql(u8, header[0..VERSION_END], VERSION);
+    }
 
-    /// Client error responses (400-499)
-    pub const CLIENT_ERROR_MIN = 400;
-    pub const CLIENT_ERROR_MAX = 499;
+    pub fn hasValidDelimiters(header: []const u8) bool {
+        return header[VERSION_END] == '-' and
+            header[TRACE_ID_END] == '-' and
+            header[SPAN_ID_END] == '-';
+    }
 
-    /// Server error responses (500-599)
-    pub const SERVER_ERROR_MIN = 500;
-    pub const SERVER_ERROR_MAX = 599;
-};
+    pub fn isValid(header: []const u8) bool {
+        return hasValidLength(header) and
+            hasValidVersion(header) and
+            hasValidDelimiters(header);
+    }
 
-/// Leap year calculation constants
-pub const LeapYear = struct {
-    /// Divisor for standard leap years
-    pub const DIVISOR_4 = 4;
+    pub fn getTraceId(header: []const u8) []const u8 {
+        return header[TRACE_ID_START..TRACE_ID_END];
+    }
 
-    /// Divisor for century non-leap years
-    pub const DIVISOR_100 = 100;
-
-    /// Divisor for century leap years
-    pub const DIVISOR_400 = 400;
+    pub fn getSpanId(header: []const u8) []const u8 {
+        return header[SPAN_ID_START..SPAN_ID_END];
+    }
 };
 
 // ============================================================================
@@ -102,22 +99,65 @@ pub const LeapYear = struct {
 // ============================================================================
 
 comptime {
-    // Ensure buffer constants are powers of 2 for alignment
-    std.debug.assert(@popCount(@as(u32, Buffer.SMALL)) == 1);
-    std.debug.assert(@popCount(@as(u32, Buffer.MEDIUM)) == 1);
-    std.debug.assert(@popCount(@as(u32, Buffer.LARGE)) == 1);
-    std.debug.assert(@popCount(@as(u32, Buffer.STACK_THRESHOLD)) == 1);
-
-    // Ensure status code ranges are valid
-    std.debug.assert(StatusCode.INFO_MIN < StatusCode.INFO_MAX);
-    std.debug.assert(StatusCode.SUCCESS_MIN < StatusCode.SUCCESS_MAX);
-    std.debug.assert(StatusCode.REDIRECT_MIN < StatusCode.REDIRECT_MAX);
-    std.debug.assert(StatusCode.CLIENT_ERROR_MIN < StatusCode.CLIENT_ERROR_MAX);
-    std.debug.assert(StatusCode.SERVER_ERROR_MIN < StatusCode.SERVER_ERROR_MAX);
+    // Ensure buffer size is a power of 2 for alignment
+    std.debug.assert(@popCount(@as(u32, Buffer.DEFAULT_SIZE)) == 1);
 
     // Ensure time constants are positive
     std.debug.assert(Time.SECONDS_PER_DAY > 0);
     std.debug.assert(Time.DAYS_PER_YEAR > 0);
     std.debug.assert(Time.EPOCH_YEAR > 0);
     std.debug.assert(Time.MAX_YEAR > Time.EPOCH_YEAR);
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+const testing = std.testing;
+
+const valid_header = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+
+test "Traceparent.hasValidLength" {
+    // valid length
+    try testing.expect(Traceparent.hasValidLength(valid_header));
+    // exactly 55 chars
+    try testing.expect(Traceparent.hasValidLength(valid_header[0..55]));
+    // too short
+    try testing.expect(!Traceparent.hasValidLength("00-abc-def-01"));
+    // empty
+    try testing.expect(!Traceparent.hasValidLength(""));
+}
+
+test "Traceparent.hasValidVersion" {
+    // valid version 00
+    try testing.expect(Traceparent.hasValidVersion(valid_header));
+    // invalid version 01
+    const v01 = "01-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+    try testing.expect(!Traceparent.hasValidVersion(v01));
+    // invalid version ff
+    const vff = "ff-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+    try testing.expect(!Traceparent.hasValidVersion(vff));
+}
+
+test "Traceparent.hasValidDelimiters" {
+    // valid delimiters
+    try testing.expect(Traceparent.hasValidDelimiters(valid_header));
+    // underscores instead of dashes
+    const underscores = "00_0af7651916cd43dd8448eb211c80319c_b7ad6b7169203331_01";
+    try testing.expect(!Traceparent.hasValidDelimiters(underscores));
+}
+
+test "Traceparent.isValid" {
+    try testing.expect(Traceparent.isValid(valid_header));
+    try testing.expect(!Traceparent.isValid("invalid"));
+}
+
+test "Traceparent.getTraceId" {
+    const trace_id = Traceparent.getTraceId(valid_header);
+    try testing.expectEqualStrings("0af7651916cd43dd8448eb211c80319c", trace_id);
+}
+
+test "Traceparent.getSpanId" {
+    const span_id = Traceparent.getSpanId(valid_header);
+    try testing.expectEqualStrings("b7ad6b7169203331", span_id);
 }

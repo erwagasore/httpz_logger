@@ -6,12 +6,12 @@ Request logging middleware for [http.zig](https://github.com/karlseguin/http.zig
 
 **Logfmt format (default):**
 ```
-timestamp=2025-01-01T12:00:00Z level=info method=GET path=/api/users status=200 duration_ms=12 size=45 client=127.0.0.1:54321 trace_id=0af7651916cd43dd8448eb211c80319c span_id=b7ad6b7169203331 user_agent="curl/8.0"
+timestamp=2025-01-01T12:00:00Z level=info method=GET path=/api/users status=200 size=45 duration_ms=12 client=127.0.0.1:54321 trace_id=0af7651916cd43dd8448eb211c80319c span_id=b7ad6b7169203331 query=page=1 user_agent=curl/8.0 user_id=user123 request_id=req-abc
 ```
 
 **JSON format:**
 ```json
-{"timestamp":"2025-01-01T12:00:00Z","level":"info","trace_id":"0af7651916cd43dd8448eb211c80319c","span_id":"b7ad6b7169203331","method":"GET","client":"127.0.0.1:54321","path":"/api/users","status":200,"size":45,"duration_ms":12,"user_agent":"curl/8.0"}
+{"timestamp":"2025-01-01T12:00:00Z","level":"info","method":"GET","path":"/api/users","query":"page=1","status":200,"size":45,"duration_ms":12,"client":"127.0.0.1:54321","trace_id":"0af7651916cd43dd8448eb211c80319c","span_id":"b7ad6b7169203331","user_agent":"curl/8.0","user_id":"user123","request_id":"req-abc"}
 ```
 
 ## Installation
@@ -64,16 +64,17 @@ fn handleIndex(_: *httpz.Request, res: *httpz.Response) !void {
 
 ```zig
 const logger = try server.middleware(HttpLogger, .{
-    .format = .json,           // .logfmt (default) or .json
-    .min_status = 400,         // only log responses >= this status (default: 0, log all)
-    .min_level = .warn,        // only log at this level or higher (default: .info)
-    .log_query = true,         // log query string (default: true)
-    .log_user_agent = true,    // log User-Agent header (default: true)
-    .log_client = true,        // log client IP address (default: true)
-    .log_trace_id = true,      // log OpenTelemetry trace ID (default: true)
-    .log_span_id = true,       // log OpenTelemetry span ID (default: true)
-    .log_request_id = true,    // log X-Request-ID header (default: true)
-    .log_user_id = true,       // log X-User-ID header (default: true)
+    .format = .json,              // .logfmt (default) or .json
+    .min_status = 400,            // only log responses >= this status (default: 0, log all)
+    .min_level = .warn,           // only log at this level or higher (default: .info)
+    .log_query = true,            // log query string (default: true)
+    .log_user_agent = true,       // log User-Agent header (default: true)
+    .log_client = true,           // log client IP address (default: true)
+    .log_trace_id = true,         // log OpenTelemetry trace ID (default: true)
+    .log_span_id = true,          // log OpenTelemetry span ID (default: true)
+    .log_request_id = true,       // log X-Request-ID header (default: true)
+    .log_user_id = true,          // log X-User-ID header (default: true)
+    .log_errors_to_stderr = true, // log truncation/format errors to stderr (default: true)
 });
 ```
 
@@ -91,6 +92,7 @@ const logger = try server.middleware(HttpLogger, .{
 | `log_span_id` | `bool` | `true` | Include OpenTelemetry span ID from `traceparent` header |
 | `log_request_id` | `bool` | `true` | Include X-Request-ID header in logs |
 | `log_user_id` | `bool` | `true` | Include X-User-ID header in logs |
+| `log_errors_to_stderr` | `bool` | `true` | Log truncation/format errors to stderr |
 
 ## Log Levels
 
@@ -110,6 +112,43 @@ traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
 ```
 
 This enables log correlation with distributed traces in systems like Grafana Loki, Jaeger, and Datadog.
+
+## Performance
+
+### Memory Strategy
+
+httpz_logger uses **thread-local buffers** for zero-allocation, lock-free logging — the same approach used by production loggers like [Zap](https://github.com/uber-go/zap) (Go) and [Zerolog](https://github.com/rs/zerolog) (Go).
+
+| Metric | Value |
+|--------|-------|
+| Allocation per request | **Zero** |
+| Lock contention | **None** |
+| Buffer size | 2KB per thread |
+| Memory usage | 2KB × worker threads |
+
+**How it works:**
+- Each thread gets its own 2KB buffer via Zig's `threadlocal`
+- Buffer is reused across requests — no malloc/free per log
+- No locks needed — threads never share buffers
+- Hot buffer stays in L1 cache for maximum throughput
+
+**Memory footprint examples:**
+
+| Worker Threads | Total Memory |
+|----------------|--------------|
+| 4 | 8 KB |
+| 16 | 32 KB |
+| 64 | 128 KB |
+
+This design handles high-traffic production workloads without breaking a sweat.
+
+### Why not configurable buffer size?
+
+We intentionally use a fixed 2KB buffer because:
+- 99.9% of HTTP logs fit in < 1KB
+- Fixed size enables compile-time optimization
+- Simplifies the API — one less config option to worry about
+- If a log exceeds 2KB, it's truncated with a warning to stderr
 
 ## License
 
