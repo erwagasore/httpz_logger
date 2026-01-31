@@ -1,6 +1,6 @@
 .{
     .name = .httpz_logger,
-    .version = "0.0.2",
+    .version = "0.1.2",
     .fingerprint = 0xd5c0bd8953fa37ae,
     .dependencies = .{
         .httpz = .{
