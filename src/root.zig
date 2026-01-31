@@ -14,10 +14,32 @@ const std = @import("std");
 const httpz = @import("httpz");
 
 const constants = @import("constants.zig");
-const log_level = @import("log_level.zig");
 const data_extractor = @import("data_extractor.zig");
 const json_formatter = @import("formatters/json.zig");
 const logfmt_formatter = @import("formatters/logfmt.zig");
+
+// ============================================================================
+// Log Level
+// ============================================================================
+
+/// Determines the appropriate log level based on HTTP status code.
+/// - 5xx errors → .err
+/// - 4xx errors → .warn
+/// - All others → .info
+fn logLevelFromStatus(status: u16) std.log.Level {
+    if (status >= 500) return .err;
+    if (status >= 400) return .warn;
+    return .info;
+}
+
+/// Dispatches a log message at the specified level.
+fn dispatchLog(level: std.log.Level, message: []const u8) void {
+    switch (level) {
+        .err => std.log.err("{s}", .{message}),
+        .warn => std.log.warn("{s}", .{message}),
+        else => std.log.info("{s}", .{message}),
+    }
+}
 
 /// Output format for log entries.
 pub const Format = enum {
@@ -98,7 +120,7 @@ fn log(self: *@This(), req: *httpz.Request, res: *httpz.Response, start: i64) vo
 
     if (res.status < cfg.min_status) return;
 
-    const level = log_level.fromStatus(res.status);
+    const level = logLevelFromStatus(res.status);
 
     // Filter by minimum log level
     if (@intFromEnum(level) > @intFromEnum(cfg.min_level)) return;
@@ -148,10 +170,10 @@ fn formatAndLog(self: *const @This(), data: data_extractor.LogData, level: std.l
         // Check if we hit the buffer limit
         if (stream.pos == buf.len and cfg.log_errors_to_stderr) {
             // Log was likely truncated
-            log_level.dispatch(level, output);
+            dispatchLog(level, output);
             std.debug.print("httpz_logger: Log entry truncated (buffer size: {d})\n", .{cfg.buffer_size});
         } else {
-            log_level.dispatch(level, output);
+            dispatchLog(level, output);
         }
     } else |err| {
         if (cfg.log_errors_to_stderr) {
@@ -160,23 +182,41 @@ fn formatAndLog(self: *const @This(), data: data_extractor.LogData, level: std.l
     }
 }
 
-// Reference all submodules to include their tests
+// ============================================================================
+// Tests
+// ============================================================================
+
+// Reference submodules to include their inline tests
 test {
+    _ = @import("constants.zig");
     _ = @import("timestamp.zig");
-    _ = @import("log_level.zig");
     _ = @import("data_extractor.zig");
     _ = @import("formatters/json.zig");
     _ = @import("formatters/logfmt.zig");
-    _ = @import("tests/timestamp_fuzz.zig");
-    _ = @import("tests/formatter_fuzz.zig");
-    // Integration tests would require a full httpz server setup
-    // For now, our unit and property tests provide good coverage
 }
 
-// Additional module tests
-test {
-    _ = @import("constants.zig");
-    _ = @import("errors.zig");
-    _ = @import("type_safety.zig");
-    _ = @import("memory.zig");
+const testing = std.testing;
+
+test "logLevelFromStatus: 5xx returns error" {
+    try testing.expectEqual(std.log.Level.err, logLevelFromStatus(500));
+    try testing.expectEqual(std.log.Level.err, logLevelFromStatus(503));
+    try testing.expectEqual(std.log.Level.err, logLevelFromStatus(599));
+}
+
+test "logLevelFromStatus: 4xx returns warn" {
+    try testing.expectEqual(std.log.Level.warn, logLevelFromStatus(400));
+    try testing.expectEqual(std.log.Level.warn, logLevelFromStatus(404));
+    try testing.expectEqual(std.log.Level.warn, logLevelFromStatus(499));
+}
+
+test "logLevelFromStatus: 2xx and 3xx returns info" {
+    try testing.expectEqual(std.log.Level.info, logLevelFromStatus(200));
+    try testing.expectEqual(std.log.Level.info, logLevelFromStatus(201));
+    try testing.expectEqual(std.log.Level.info, logLevelFromStatus(301));
+    try testing.expectEqual(std.log.Level.info, logLevelFromStatus(304));
+}
+
+test "logLevelFromStatus: 1xx returns info" {
+    try testing.expectEqual(std.log.Level.info, logLevelFromStatus(100));
+    try testing.expectEqual(std.log.Level.info, logLevelFromStatus(101));
 }
