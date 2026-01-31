@@ -96,3 +96,28 @@ pub const LeapYear = struct {
     /// Divisor for century leap years
     pub const DIVISOR_400 = 400;
 };
+
+// ============================================================================
+// Compile-time Validation
+// ============================================================================
+
+comptime {
+    // Ensure buffer constants are powers of 2 for alignment
+    std.debug.assert(@popCount(@as(u32, Buffer.SMALL)) == 1);
+    std.debug.assert(@popCount(@as(u32, Buffer.MEDIUM)) == 1);
+    std.debug.assert(@popCount(@as(u32, Buffer.LARGE)) == 1);
+    std.debug.assert(@popCount(@as(u32, Buffer.STACK_THRESHOLD)) == 1);
+
+    // Ensure status code ranges are valid
+    std.debug.assert(StatusCode.INFO_MIN < StatusCode.INFO_MAX);
+    std.debug.assert(StatusCode.SUCCESS_MIN < StatusCode.SUCCESS_MAX);
+    std.debug.assert(StatusCode.REDIRECT_MIN < StatusCode.REDIRECT_MAX);
+    std.debug.assert(StatusCode.CLIENT_ERROR_MIN < StatusCode.CLIENT_ERROR_MAX);
+    std.debug.assert(StatusCode.SERVER_ERROR_MIN < StatusCode.SERVER_ERROR_MAX);
+
+    // Ensure time constants are positive
+    std.debug.assert(Time.SECONDS_PER_DAY > 0);
+    std.debug.assert(Time.DAYS_PER_YEAR > 0);
+    std.debug.assert(Time.EPOCH_YEAR > 0);
+    std.debug.assert(Time.MAX_YEAR > Time.EPOCH_YEAR);
+}
