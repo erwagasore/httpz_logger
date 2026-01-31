@@ -14,12 +14,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
 
       - name: Bump version and push tag
         id: tag
         uses: mathieudutour/github-tag-action@v6.2
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.PAT_TOKEN }}
           default_bump: false
           tag_prefix: v
           release_branches: main
@@ -32,7 +33,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add build.zig.zon
-          git commit -m "chore: bump version to $version" || true
+          git commit -m "chore: bump version to $version [skip ci]" || true
           git push
 
       - name: Create release
