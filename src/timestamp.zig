@@ -1,14 +1,8 @@
 const std = @import("std");
 const constants = @import("constants.zig");
+const Time = constants.Time;
 
 const Self = @This();
-
-/// Seconds per minute
-const SECS_PER_MIN: i64 = 60;
-/// Seconds per hour
-const SECS_PER_HOUR: i64 = 60 * SECS_PER_MIN;
-/// Seconds per day
-const SECS_PER_DAY: i64 = constants.Time.SECONDS_PER_DAY;
 
 /// Days in each month (non-leap year)
 const DAYS_IN_MONTH = [_]u8{ 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
@@ -65,19 +59,19 @@ pub fn dayOfYear(self: *Self) u16 {
 }
 
 pub fn hour(self: *const Self) u8 {
-    return @intCast(@mod(@divFloor(self.timestamp, SECS_PER_HOUR), 24));
+    return @intCast(@mod(@divFloor(self.timestamp, Time.SECONDS_PER_HOUR), Time.HOURS_PER_DAY));
 }
 
 pub fn minute(self: *const Self) u8 {
-    return @intCast(@mod(@divFloor(self.timestamp, SECS_PER_MIN), 60));
+    return @intCast(@mod(@divFloor(self.timestamp, Time.SECONDS_PER_MINUTE), Time.MINUTES_PER_HOUR));
 }
 
 pub fn second(self: *const Self) u8 {
-    return @intCast(@mod(self.timestamp, 60));
+    return @intCast(@mod(self.timestamp, Time.SECONDS_PER_MINUTE));
 }
 
 pub fn daysSinceEpoch(self: *const Self) i64 {
-    return @divFloor(self.timestamp, SECS_PER_DAY);
+    return @divFloor(self.timestamp, Time.SECONDS_PER_DAY);
 }
 
 fn ensureCached(self: *Self) void {
@@ -88,41 +82,41 @@ fn ensureCached(self: *Self) void {
     // Handle dates before Unix epoch (1970)
     if (remaining < 0) {
         // Clamp to minimum valid date
-        self.cached_year = constants.Time.EPOCH_YEAR;
+        self.cached_year = Time.EPOCH_YEAR;
         self.cached_day_of_year = 1;
         self.cached = true;
         return;
     }
 
     // Handle dates after reasonable maximum (year 9999)
-    if (remaining > constants.Time.DAYS_PER_YEAR * constants.Time.MAX_YEARS_FROM_EPOCH) {
-        self.cached_year = constants.Time.MAX_YEAR;
-        self.cached_day_of_year = constants.Time.DAYS_PER_YEAR;
+    if (remaining > Time.DAYS_PER_YEAR * (Time.MAX_YEAR - Time.EPOCH_YEAR)) {
+        self.cached_year = Time.MAX_YEAR;
+        self.cached_day_of_year = Time.DAYS_PER_YEAR;
         self.cached = true;
         return;
     }
 
-    var y: u16 = constants.Time.EPOCH_YEAR;
+    var y: u16 = Time.EPOCH_YEAR;
     while (true) {
-        const days_in_year: i64 = if (isLeapYear(y)) constants.Time.DAYS_PER_LEAP_YEAR else constants.Time.DAYS_PER_YEAR;
+        const days_in_year: i64 = if (Time.isLeapYear(y)) Time.DAYS_PER_LEAP_YEAR else Time.DAYS_PER_YEAR;
         if (remaining < days_in_year) break;
         remaining -= days_in_year;
         y += 1;
-        if (y > constants.Time.MAX_YEAR) {
+        if (y > Time.MAX_YEAR) {
             // Prevent overflow
-            y = constants.Time.MAX_YEAR;
+            y = Time.MAX_YEAR;
             break;
         }
     }
 
     self.cached_year = y;
-    self.cached_day_of_year = @intCast(@max(1, @min(366, remaining + 1)));
+    self.cached_day_of_year = @intCast(@max(1, @min(Time.DAYS_PER_LEAP_YEAR, remaining + 1)));
     self.cached = true;
 }
 
 fn monthAndDay(y: u16, day_of_year: u16) struct { month: u8, day: u8 } {
     var remaining = day_of_year;
-    const leap = isLeapYear(y);
+    const leap = Time.isLeapYear(y);
 
     for (DAYS_IN_MONTH, 0..) |days, i| {
         var month_days = days;
@@ -133,66 +127,59 @@ fn monthAndDay(y: u16, day_of_year: u16) struct { month: u8, day: u8 } {
     return .{ .month = 12, .day = @intCast(remaining) };
 }
 
-fn isLeapYear(y: u16) bool {
-    return (@mod(y, constants.LeapYear.DIVISOR_4) == 0 and @mod(y, constants.LeapYear.DIVISOR_100) != 0) or (@mod(y, constants.LeapYear.DIVISOR_400) == 0);
-}
-
 const testing = std.testing;
 
-test "unix epoch" {
-    var ts = init(0);
-    try testing.expectEqual(@as(u16, constants.Time.EPOCH_YEAR), ts.year());
-    try testing.expectEqual(@as(u8, 1), ts.month());
-    try testing.expectEqual(@as(u8, 1), ts.dayOfMonth());
-    try testing.expectEqual(@as(u8, 0), ts.hour());
-    try testing.expectEqual(@as(u8, 0), ts.minute());
-    try testing.expectEqual(@as(u8, 0), ts.second());
+test "timestamp parsing" {
+    // unix epoch
+    var epoch = init(0);
+    try testing.expectEqual(@as(u16, Time.EPOCH_YEAR), epoch.year());
+    try testing.expectEqual(@as(u8, 1), epoch.month());
+    try testing.expectEqual(@as(u8, 1), epoch.dayOfMonth());
+    try testing.expectEqual(@as(u8, 0), epoch.hour());
+    try testing.expectEqual(@as(u8, 0), epoch.minute());
+    try testing.expectEqual(@as(u8, 0), epoch.second());
+
+    // known date 2024-02-29 (leap year)
+    var leap = init(1709209845);
+    try testing.expectEqual(@as(u16, 2024), leap.year());
+    try testing.expectEqual(@as(u8, 2), leap.month());
+    try testing.expectEqual(@as(u8, 29), leap.dayOfMonth());
+    try testing.expectEqual(@as(u8, 12), leap.hour());
+    try testing.expectEqual(@as(u8, 30), leap.minute());
+    try testing.expectEqual(@as(u8, 45), leap.second());
+
+    // end of year
+    var eoy = init(1704067199);
+    try testing.expectEqual(@as(u16, 2023), eoy.year());
+    try testing.expectEqual(@as(u8, 12), eoy.month());
+    try testing.expectEqual(@as(u8, 31), eoy.dayOfMonth());
+    try testing.expectEqual(@as(u8, 23), eoy.hour());
+    try testing.expectEqual(@as(u8, 59), eoy.minute());
+    try testing.expectEqual(@as(u8, 59), eoy.second());
 }
 
-test "known date 2024-02-29 (leap year)" {
-    var ts = init(1709209845);
-    try testing.expectEqual(@as(u16, 2024), ts.year());
-    try testing.expectEqual(@as(u8, 2), ts.month());
-    try testing.expectEqual(@as(u8, 29), ts.dayOfMonth());
-    try testing.expectEqual(@as(u8, 12), ts.hour());
-    try testing.expectEqual(@as(u8, 30), ts.minute());
-    try testing.expectEqual(@as(u8, 45), ts.second());
-}
+test "leap year handling" {
+    // year 2000 (leap year, divisible by 100 and 400)
+    var y2000 = init(951868800);
+    try testing.expectEqual(@as(u16, 2000), y2000.year());
+    try testing.expectEqual(@as(u8, 3), y2000.month());
+    try testing.expectEqual(@as(u8, 1), y2000.dayOfMonth());
 
-test "year 2000 (leap year, divisible by 100 and 400)" {
-    var ts = init(951868800);
-    try testing.expectEqual(@as(u16, 2000), ts.year());
-    try testing.expectEqual(@as(u8, 3), ts.month());
-    try testing.expectEqual(@as(u8, 1), ts.dayOfMonth());
-}
-
-test "year 2100 (not a leap year)" {
-    var ts = init(4107542400);
-    try testing.expectEqual(@as(u16, 2100), ts.year());
-    try testing.expectEqual(@as(u8, 3), ts.month());
-    try testing.expectEqual(@as(u8, 1), ts.dayOfMonth());
-}
-
-test "end of year" {
-    var ts = init(1704067199);
-    try testing.expectEqual(@as(u16, 2023), ts.year());
-    try testing.expectEqual(@as(u8, 12), ts.month());
-    try testing.expectEqual(@as(u8, 31), ts.dayOfMonth());
-    try testing.expectEqual(@as(u8, 23), ts.hour());
-    try testing.expectEqual(@as(u8, 59), ts.minute());
-    try testing.expectEqual(@as(u8, 59), ts.second());
+    // year 2100 (not a leap year)
+    var y2100 = init(4107542400);
+    try testing.expectEqual(@as(u16, 2100), y2100.year());
+    try testing.expectEqual(@as(u8, 3), y2100.month());
+    try testing.expectEqual(@as(u8, 1), y2100.dayOfMonth());
 }
 
 test "iso8601 format" {
-    var ts = init(1704067199);
     var buf: [20]u8 = undefined;
-    const result = ts.iso8601(&buf);
-    try testing.expectEqualStrings("2023-12-31T23:59:59Z", result);
-}
 
-test "iso8601 format epoch" {
-    var ts = init(0);
-    var buf: [20]u8 = undefined;
-    const result = ts.iso8601(&buf);
-    try testing.expectEqualStrings("1970-01-01T00:00:00Z", result);
+    // regular date
+    var ts = init(1704067199);
+    try testing.expectEqualStrings("2023-12-31T23:59:59Z", ts.iso8601(&buf));
+
+    // epoch
+    var epoch = init(0);
+    try testing.expectEqualStrings("1970-01-01T00:00:00Z", epoch.iso8601(&buf));
 }
