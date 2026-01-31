@@ -1,7 +1,9 @@
 name: Release
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
 
 permissions:
@@ -10,11 +12,16 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Only run if CI succeeded and it was a push event (not PR)
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
+          ref: ${{ github.event.workflow_run.head_branch }}
 
       - name: Bump version and push tag
         id: tag
