@@ -131,32 +131,32 @@ httpz_logger uses **thread-local buffers** for zero-allocation, lock-free loggin
 |--------|-------|
 | Allocation per request | **Zero** |
 | Lock contention | **None** |
-| Buffer size | 2KB per thread |
-| Memory usage | 2KB × worker threads |
+| Buffer size | 2KB primary + 8KB fallback per thread |
+| Memory usage | 10KB × worker threads |
 
 **How it works:**
-- Each thread gets its own 2KB buffer via Zig's `threadlocal`
-- Buffer is reused across requests — no malloc/free per log
+- Each thread gets its own buffers via Zig's `threadlocal`
+- Primary 2KB buffer handles 99% of logs
+- 8KB fallback buffer catches oversized entries (long User-Agent, query strings)
+- Buffers reused across requests — no malloc/free per log
 - No locks needed — threads never share buffers
-- Hot buffer stays in L1 cache for maximum throughput
 
 **Memory footprint examples:**
 
 | Worker Threads | Total Memory |
 |----------------|--------------|
-| 4 | 8 KB |
-| 16 | 32 KB |
-| 64 | 128 KB |
+| 4 | 40 KB |
+| 16 | 160 KB |
+| 64 | 640 KB |
 
-This design handles high-traffic production workloads without breaking a sweat.
+This tiered approach follows the [logz](https://github.com/karlseguin/log.zig) pattern used in production Zig applications.
 
-### Why not configurable buffer size?
+### Why tiered buffers instead of one large buffer?
 
-We intentionally use a fixed 2KB buffer because:
-- 99.9% of HTTP logs fit in < 1KB
-- Fixed size enables compile-time optimization
-- Simplifies the API — one less config option to worry about
-- If a log exceeds 2KB, it's truncated with a warning to stderr
+- Most logs are small (~300-800 bytes) — 2KB is plenty
+- Large buffer only used when needed — better cache locality
+- Fixed sizes enable compile-time optimization
+- Only warns when both buffers are exhausted (truly huge logs)
 
 ## License
 
