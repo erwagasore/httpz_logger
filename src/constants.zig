@@ -42,8 +42,12 @@ pub const Time = struct {
 
 /// Buffer size constants
 pub const Buffer = struct {
-    /// Buffer size for log entries (used by thread-local buffer)
+    /// Primary buffer size for log entries (2KB - handles 99% of logs)
     pub const DEFAULT_SIZE = 2048;
+
+    /// Large fallback buffer for oversized log entries (8KB)
+    /// Used when primary buffer is exhausted
+    pub const LARGE_SIZE = 8192;
 };
 
 /// HTTP status code boundaries for log level classification
@@ -99,8 +103,12 @@ pub const Traceparent = struct {
 // ============================================================================
 
 comptime {
-    // Ensure buffer size is a power of 2 for alignment
+    // Ensure buffer sizes are powers of 2 for alignment
     std.debug.assert(@popCount(@as(u32, Buffer.DEFAULT_SIZE)) == 1);
+    std.debug.assert(@popCount(@as(u32, Buffer.LARGE_SIZE)) == 1);
+
+    // Ensure large buffer is actually larger than default
+    std.debug.assert(Buffer.LARGE_SIZE > Buffer.DEFAULT_SIZE);
 
     // Ensure time constants are positive
     std.debug.assert(Time.SECONDS_PER_DAY > 0);
