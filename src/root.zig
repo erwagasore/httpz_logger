@@ -23,6 +23,10 @@ const data_extractor = @import("data_extractor.zig");
 /// Each thread gets its own buffer - no locks, no contention.
 threadlocal var log_buffer: [Buffer.DEFAULT_SIZE]u8 = undefined;
 
+/// Large fallback buffer used when primary buffer is exhausted.
+/// Only accessed when a log entry exceeds DEFAULT_SIZE bytes.
+threadlocal var large_log_buffer: [Buffer.LARGE_SIZE]u8 = undefined;
+
 // ============================================================================
 // Log Level
 // ============================================================================
@@ -137,34 +141,66 @@ fn log(self: *@This(), req: *httpz.Request, res: *httpz.Response, start: i64) vo
         .log_user_id = cfg.log_user_id,
     }, &self.timestamp_cache);
 
-    self.formatAndLog(data, level, &log_buffer);
+    self.formatAndLog(data, level);
 }
 
-fn formatAndLog(self: *const @This(), data: data_extractor.LogData, level: std.log.Level, buf: []u8) void {
-    const cfg = self.config;
+/// Formats and logs using tiered buffers: tries 2KB first, falls back to 8KB.
+fn formatAndLog(self: *const @This(), data: data_extractor.LogData, level: std.log.Level) void {
+    // Try primary buffer (2KB) - handles 99% of logs
+    if (self.tryFormat(data, level, &log_buffer)) |output| {
+        dispatchLog(level, output);
+        return;
+    }
+
+    // Try large buffer (8KB) - handles oversized logs
+    if (self.tryFormat(data, level, &large_log_buffer)) |output| {
+        dispatchLog(level, output);
+        return;
+    }
+
+    // Both buffers exhausted - output truncated with warning
+    self.logTruncated(data, level);
+}
+
+/// Attempts to format into buffer. Returns written slice on success, null if buffer exhausted.
+fn tryFormat(self: *const @This(), data: data_extractor.LogData, level: std.log.Level, buf: []u8) ?[]const u8 {
     var stream = std.io.fixedBufferStream(buf);
     const writer = stream.writer();
 
-    const format_result = switch (cfg.format) {
+    const result = switch (self.config.format) {
         .json => data.toJson(level, writer),
         .logfmt => data.toLogfmt(level, writer),
     };
 
-    if (format_result) |_| {
-        const output = stream.getWritten();
-
-        // Check if we hit the buffer limit
-        if (stream.pos == Buffer.DEFAULT_SIZE and cfg.log_errors_to_stderr) {
-            // Log was likely truncated
-            dispatchLog(level, output);
-            std.debug.print("httpz_logger: Log entry truncated (buffer size: {d})\n", .{Buffer.DEFAULT_SIZE});
-        } else {
-            dispatchLog(level, output);
-        }
+    if (result) |_| {
+        // Buffer full = likely truncated, try larger buffer
+        if (stream.pos == buf.len) return null;
+        return stream.getWritten();
     } else |err| {
-        if (cfg.log_errors_to_stderr) {
+        if (err == error.NoSpaceLeft) return null;
+        if (self.config.log_errors_to_stderr) {
             std.debug.print("httpz_logger: Failed to format log: {}\n", .{err});
         }
+        return stream.getWritten(); // Return partial on other errors
+    }
+}
+
+/// Outputs truncated log with warning to stderr.
+fn logTruncated(self: *const @This(), data: data_extractor.LogData, level: std.log.Level) void {
+    var stream = std.io.fixedBufferStream(&large_log_buffer);
+    _ = switch (self.config.format) {
+        .json => data.toJson(level, stream.writer()),
+        .logfmt => data.toLogfmt(level, stream.writer()),
+    } catch {};
+
+    const output = stream.getWritten();
+    if (output.len > 0) dispatchLog(level, output);
+
+    if (self.config.log_errors_to_stderr) {
+        std.debug.print("httpz_logger: Log truncated (exceeded {d}B, fallback {d}B exhausted)\n", .{
+            Buffer.DEFAULT_SIZE,
+            Buffer.LARGE_SIZE,
+        });
     }
 }
 
