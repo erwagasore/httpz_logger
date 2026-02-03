@@ -86,34 +86,13 @@ pub const LogData = struct {
         try writeLogfmtValue(writer, self.path);
         try writer.print(" status={d} size={d} duration_ms={d}", .{ self.status, self.size, self.duration_ms });
         const client_addr = self.client();
-        if (client_addr.len > 0) {
-            try writer.print(" client=", .{});
-            try writeLogfmtValue(writer, client_addr);
-        }
-        if (self.trace_id) |v| {
-            try writer.print(" trace_id=", .{});
-            try writeLogfmtValue(writer, v);
-        }
-        if (self.span_id) |v| {
-            try writer.print(" span_id=", .{});
-            try writeLogfmtValue(writer, v);
-        }
-        if (self.query) |v| {
-            try writer.print(" query=", .{});
-            try writeLogfmtValue(writer, v);
-        }
-        if (self.user_agent) |v| {
-            try writer.print(" user_agent=", .{});
-            try writeLogfmtValue(writer, v);
-        }
-        if (self.user_id) |v| {
-            try writer.print(" user_id=", .{});
-            try writeLogfmtValue(writer, v);
-        }
-        if (self.request_id) |v| {
-            try writer.print(" request_id=", .{});
-            try writeLogfmtValue(writer, v);
-        }
+        if (client_addr.len > 0) try writeLogfmtField(writer, "client", client_addr);
+        if (self.trace_id) |v| try writeLogfmtField(writer, "trace_id", v);
+        if (self.span_id) |v| try writeLogfmtField(writer, "span_id", v);
+        if (self.query) |v| try writeLogfmtField(writer, "query", v);
+        if (self.user_agent) |v| try writeLogfmtField(writer, "user_agent", v);
+        if (self.user_id) |v| try writeLogfmtField(writer, "user_id", v);
+        if (self.request_id) |v| try writeLogfmtField(writer, "request_id", v);
     }
 };
 
@@ -142,7 +121,7 @@ fn writeLogfmtValue(writer: anytype, value: []const u8) !void {
             '\t' => try writer.writeAll("\\t"),
             else => {
                 if (c < 0x20 or c == 0x7f) {
-                    try writer.print("\\x{X:0>2}", .{c});
+                    try writer.print("\\x{x:0>2}", .{c});
                 } else {
                     try writer.writeByte(c);
                 }
@@ -150,6 +129,11 @@ fn writeLogfmtValue(writer: anytype, value: []const u8) !void {
         }
     }
     try writer.writeByte('"');
+}
+
+fn writeLogfmtField(writer: anytype, key: []const u8, value: []const u8) !void {
+    try writer.print(" {s}=", .{key});
+    try writeLogfmtValue(writer, value);
 }
 
 pub const ExtractConfig = struct {
@@ -256,6 +240,67 @@ test "toLogfmt escapes and quotes values" {
         "timestamp=2025-01-01T00:00:00Z level=info method=GET path=\"/hello world\" status=200 size=0 duration_ms=5" ++
         " trace_id=0af7651916cd43dd8448eb211c80319c span_id=b7ad6b7169203331" ++
         " query=\"a=1 b=2\" user_agent=curl/8.0 user_id=\"user\\\"x\" request_id=\"req\\\\id\"";
+    try testing.expectEqualStrings(expected, stream.getWritten());
+}
+
+test "toLogfmt includes client and handles empty values" {
+    var data: LogData = .{
+        .method = .POST,
+        .path = "/api",
+        .query = "", // empty string should be quoted
+        .status = 201,
+        .size = 42,
+        .duration_ms = 10,
+        .user_agent = null,
+        .user_id = null,
+        .request_id = null,
+        .trace_id = null,
+        .span_id = null,
+    };
+
+    const ts = "2025-01-01T00:00:00Z";
+    @memcpy(&data.timestamp_buf, ts);
+
+    // Set client address
+    const client_ip = "192.168.1.100";
+    @memcpy(data.address_buf[0..client_ip.len], client_ip);
+    data.address_len = client_ip.len;
+
+    var buf: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    try data.toLogfmt(.warn, stream.writer());
+
+    const expected =
+        "timestamp=2025-01-01T00:00:00Z level=warn method=POST path=/api status=201 size=42 duration_ms=10" ++
+        " client=192.168.1.100 query=\"\"";
+    try testing.expectEqualStrings(expected, stream.getWritten());
+}
+
+test "toLogfmt escapes control characters" {
+    var data: LogData = .{
+        .method = .GET,
+        .path = "/test",
+        .query = null,
+        .status = 200,
+        .size = 0,
+        .duration_ms = 1,
+        .user_agent = "bot\x00\x1f\x7f", // null, unit separator, DEL
+        .user_id = null,
+        .request_id = null,
+        .trace_id = null,
+        .span_id = null,
+    };
+
+    const ts = "2025-01-01T00:00:00Z";
+    @memcpy(&data.timestamp_buf, ts);
+
+    var buf: [256]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    try data.toLogfmt(.info, stream.writer());
+
+    const expected =
+        "timestamp=2025-01-01T00:00:00Z level=info method=GET path=/test status=200 size=0 duration_ms=1" ++
+        " user_agent=\"bot\\x00\\x1f\\x7f\"";
     try testing.expectEqualStrings(expected, stream.getWritten());
 }
 
