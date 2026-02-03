@@ -18,6 +18,7 @@ const Buffer = constants.Buffer;
 const Status = constants.Status;
 
 const data_extractor = @import("data_extractor.zig");
+const Timestamp = @import("timestamp.zig");
 
 /// Thread-local buffer for zero-allocation logging.
 /// Each thread gets its own buffer - no locks, no contention.
@@ -69,33 +70,41 @@ pub const Config = struct {
     /// Minimum log level to emit (.debug, .info, .warn, .err)
     min_level: std.log.Level = .info,
 
-    /// Include query string in logs (may contain sensitive data)
-    log_query: bool = true,
-
-    /// Include User-Agent header
-    log_user_agent: bool = true,
-
-    /// Include client IP address and port
-    log_client: bool = true,
-
-    /// Include OpenTelemetry trace ID from traceparent header
-    log_trace_id: bool = true,
-
-    /// Include OpenTelemetry span ID from traceparent header
-    log_span_id: bool = true,
-
-    /// Include X-Request-ID header for request correlation
-    log_request_id: bool = true,
-
-    /// Include X-User-ID header for user tracking
-    log_user_id: bool = true,
-
     /// Log formatting/buffer errors to stderr for debugging
     log_errors_to_stderr: bool = true,
+
+    /// Field extraction options (which fields to include in logs)
+    fields: data_extractor.ExtractConfig = .{},
+
+    /// Returns default configuration.
+    /// Logs all requests in logfmt format with all fields enabled.
+    pub fn default() Config {
+        return .{
+            .format = .logfmt,
+            .min_status = 0,
+            .min_level = .info,
+            .log_errors_to_stderr = true,
+            .fields = .{
+                .log_query = true,
+                .log_user_agent = true,
+                .log_client = true,
+                .log_trace_id = true,
+                .log_span_id = true,
+                .log_request_id = true,
+                .log_user_id = true,
+            },
+        };
+    }
+};
+
+/// Cache for timestamp formatting to avoid repeated calculations within the same second.
+const TimestampCache = struct {
+    last_second: i64 = -1,
+    cached_timestamp: [20]u8 = undefined,
 };
 
 config: Config,
-timestamp_cache: data_extractor.TimestampCache,
+timestamp_cache: TimestampCache,
 
 /// Initialize a new HTTP logger middleware instance.
 ///
@@ -131,15 +140,18 @@ fn log(self: *@This(), req: *httpz.Request, res: *httpz.Response, start: i64) vo
     // Filter by minimum log level
     if (@intFromEnum(level) > @intFromEnum(cfg.min_level)) return;
 
-    const data = data_extractor.extractWithCache(req, res, start, .{
-        .log_query = cfg.log_query,
-        .log_user_agent = cfg.log_user_agent,
-        .log_client = cfg.log_client,
-        .log_trace_id = cfg.log_trace_id,
-        .log_span_id = cfg.log_span_id,
-        .log_request_id = cfg.log_request_id,
-        .log_user_id = cfg.log_user_id,
-    }, &self.timestamp_cache);
+    var data = data_extractor.extract(req, res, start, cfg.fields);
+
+    // Use cached timestamp if within the same second
+    const current_second = std.time.timestamp();
+    if (current_second == self.timestamp_cache.last_second) {
+        @memcpy(&data.timestamp_buf, &self.timestamp_cache.cached_timestamp);
+    } else {
+        var ts = Timestamp.init(current_second);
+        _ = ts.iso8601(&data.timestamp_buf);
+        @memcpy(&self.timestamp_cache.cached_timestamp, &data.timestamp_buf);
+        self.timestamp_cache.last_second = current_second;
+    }
 
     self.formatAndLog(data, level);
 }

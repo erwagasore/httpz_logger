@@ -137,13 +137,13 @@ fn writeLogfmtField(writer: anytype, key: []const u8, value: []const u8) !void {
 }
 
 pub const ExtractConfig = struct {
-    log_query: bool,
-    log_user_agent: bool,
-    log_client: bool,
-    log_trace_id: bool,
-    log_span_id: bool,
-    log_request_id: bool,
-    log_user_id: bool,
+    log_query: bool = true,
+    log_user_agent: bool = true,
+    log_client: bool = true,
+    log_trace_id: bool = true,
+    log_span_id: bool = true,
+    log_request_id: bool = true,
+    log_user_id: bool = true,
 };
 
 /// Extracts log data from request/response with timing information.
@@ -190,8 +190,6 @@ pub fn extract(
         else
             null,
     };
-
-    data.formatTimestamp();
 
     if (config.log_client) {
         data.formatClient(req.address);
@@ -302,28 +300,4 @@ test "toLogfmt escapes control characters" {
         "timestamp=2025-01-01T00:00:00Z level=info method=GET path=/test status=200 size=0 duration_ms=1" ++
         " user_agent=\"bot\\x00\\x1f\\x7f\"";
     try testing.expectEqualStrings(expected, stream.getWritten());
-}
-
-/// Cache for timestamp formatting to avoid repeated calculations
-pub const TimestampCache = struct {
-    last_second: i64 = -1,
-    cached_timestamp: [20]u8 = undefined,
-};
-
-/// Extracts log data with cached timestamp for performance.
-pub fn extractWithCache(req: *httpz.Request, res: *httpz.Response, start: i64, config: ExtractConfig, cache: *TimestampCache) LogData {
-    var data = extract(req, res, start, config);
-
-    // Use cached timestamp if within the same second
-    const current_second = @divTrunc(std.time.timestamp(), 1);
-    if (current_second == cache.last_second) {
-        @memcpy(&data.timestamp_buf, &cache.cached_timestamp);
-    } else {
-        var ts = @import("timestamp.zig").init(std.time.timestamp());
-        _ = ts.iso8601(&data.timestamp_buf);
-        @memcpy(&cache.cached_timestamp, &data.timestamp_buf);
-        cache.last_second = current_second;
-    }
-
-    return data;
 }
