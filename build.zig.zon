@@ -1,6 +1,7 @@
 .{
     .name = .httpz_logger,
     .version = "0.2.1",
+    .minimum_zig_version = "0.15.0",
     .fingerprint = 0xd5c0bd8953fa37ae,
     .dependencies = .{
         .httpz = .{
