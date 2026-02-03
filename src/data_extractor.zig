@@ -80,28 +80,77 @@ pub const LogData = struct {
 
     /// Formats as logfmt (key=value pairs) for terminal display
     pub fn toLogfmt(self: *const LogData, level: std.log.Level, writer: anytype) !void {
-        try writer.print(
-            "timestamp={s} level={s} method={s} path={s} status={d} size={d} duration_ms={d}",
-            .{
-                self.timestamp(),
-                @tagName(level),
-                @tagName(self.method),
-                self.path,
-                self.status,
-                self.size,
-                self.duration_ms,
-            },
-        );
+        try writer.print("timestamp=", .{});
+        try writeLogfmtValue(writer, self.timestamp());
+        try writer.print(" level={s} method={s} path=", .{ @tagName(level), @tagName(self.method) });
+        try writeLogfmtValue(writer, self.path);
+        try writer.print(" status={d} size={d} duration_ms={d}", .{ self.status, self.size, self.duration_ms });
         const client_addr = self.client();
-        if (client_addr.len > 0) try writer.print(" client={s}", .{client_addr});
-        if (self.trace_id) |v| try writer.print(" trace_id={s}", .{v});
-        if (self.span_id) |v| try writer.print(" span_id={s}", .{v});
-        if (self.query) |v| try writer.print(" query={s}", .{v});
-        if (self.user_agent) |v| try writer.print(" user_agent={s}", .{v});
-        if (self.user_id) |v| try writer.print(" user_id={s}", .{v});
-        if (self.request_id) |v| try writer.print(" request_id={s}", .{v});
+        if (client_addr.len > 0) {
+            try writer.print(" client=", .{});
+            try writeLogfmtValue(writer, client_addr);
+        }
+        if (self.trace_id) |v| {
+            try writer.print(" trace_id=", .{});
+            try writeLogfmtValue(writer, v);
+        }
+        if (self.span_id) |v| {
+            try writer.print(" span_id=", .{});
+            try writeLogfmtValue(writer, v);
+        }
+        if (self.query) |v| {
+            try writer.print(" query=", .{});
+            try writeLogfmtValue(writer, v);
+        }
+        if (self.user_agent) |v| {
+            try writer.print(" user_agent=", .{});
+            try writeLogfmtValue(writer, v);
+        }
+        if (self.user_id) |v| {
+            try writer.print(" user_id=", .{});
+            try writeLogfmtValue(writer, v);
+        }
+        if (self.request_id) |v| {
+            try writer.print(" request_id=", .{});
+            try writeLogfmtValue(writer, v);
+        }
     }
 };
+
+fn needsLogfmtQuoting(value: []const u8) bool {
+    if (value.len == 0) return true;
+    for (value) |c| {
+        if (c == ' ' or c == '=' or c == '"' or c == '\\') return true;
+        if (c < 0x20 or c == 0x7f) return true;
+    }
+    return false;
+}
+
+fn writeLogfmtValue(writer: anytype, value: []const u8) !void {
+    if (!needsLogfmtQuoting(value)) {
+        try writer.writeAll(value);
+        return;
+    }
+
+    try writer.writeByte('"');
+    for (value) |c| {
+        switch (c) {
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
+            else => {
+                if (c < 0x20 or c == 0x7f) {
+                    try writer.print("\\x{X:0>2}", .{c});
+                } else {
+                    try writer.writeByte(c);
+                }
+            },
+        }
+    }
+    try writer.writeByte('"');
+}
 
 pub const ExtractConfig = struct {
     log_query: bool,
@@ -181,16 +230,34 @@ test "parseTraceparent" {
     try testing.expect(parseTraceparent("invalid") == null);
 }
 
-// Note: LogData formatter tests require httpz module and must be run via `zig build test`
-// The tests below are integration tests that verify toJson and toLogfmt output formats.
-// They are conditionally compiled only when httpz is available.
-//
-// Test coverage for LogData formatters:
-// - toLogfmt: outputs key=value pairs with all fields
-// - toLogfmt: omits null optional fields
-// - toJson: outputs valid JSON with all fields
-// - toJson: omits null fields (emit_null_optional_fields = false)
-// - timestamp/client getters: return correct buffer slices
+test "toLogfmt escapes and quotes values" {
+    var data: LogData = .{
+        .method = .GET,
+        .path = "/hello world",
+        .query = "a=1 b=2",
+        .status = 200,
+        .size = 0,
+        .duration_ms = 5,
+        .user_agent = "curl/8.0",
+        .user_id = "user\"x",
+        .request_id = "req\\id",
+        .trace_id = "0af7651916cd43dd8448eb211c80319c",
+        .span_id = "b7ad6b7169203331",
+    };
+
+    const ts = "2025-01-01T00:00:00Z";
+    @memcpy(&data.timestamp_buf, ts);
+
+    var buf: [512]u8 = undefined;
+    var stream = std.io.fixedBufferStream(&buf);
+    try data.toLogfmt(.info, stream.writer());
+
+    const expected =
+        "timestamp=2025-01-01T00:00:00Z level=info method=GET path=\"/hello world\" status=200 size=0 duration_ms=5" ++
+        " trace_id=0af7651916cd43dd8448eb211c80319c span_id=b7ad6b7169203331" ++
+        " query=\"a=1 b=2\" user_agent=curl/8.0 user_id=\"user\\\"x\" request_id=\"req\\\\id\"";
+    try testing.expectEqualStrings(expected, stream.getWritten());
+}
 
 /// Cache for timestamp formatting to avoid repeated calculations
 pub const TimestampCache = struct {
